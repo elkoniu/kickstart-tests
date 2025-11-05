@@ -23,3 +23,57 @@
 TESTTYPE="skip-on-rhel-9 payload bootc"
 
 . ${KSTESTDIR}/functions.sh
+
+copy_interesting_files_from_system() {
+    local disksdir
+    disksdir="${1}"
+
+    # Find disks.
+    local args
+    args=$(for d in ${disksdir}/disk-*img; do echo -a ${d}; done)
+
+    # Use also iscsi disk if there is any.
+    if [[ -n ${iscsi_disk_img} ]]; then
+        args="${args} -a ${disksdir}/${iscsi_disk_img}"
+    fi
+
+    # Grab files out of the installed system while it still exists.
+    # Grab these files:
+    #
+    # logs from Anaconda - whole /var/log/anaconda/ directory is copied out,
+    #                      this can be used for saving specific test output
+    # original-ks.cfg - the kickstart used for the test
+    # anaconda-ks.cfg - the kickstart saved after installation, useful for
+    #                   debugging
+    # RESULT - file from the test
+    #
+    # The location of aforementioned files is different in an ostree system
+
+    root_device=$(guestfish ${args} <<< "
+        launch
+        lvs" | \
+        grep root)
+
+    for item in /ostree/deploy/test-stateroot/var/roothome/original-ks.cfg \
+                /ostree/deploy/test-stateroot/var/roothome/anaconda-ks.cfg \
+                /ostree/deploy/test-stateroot/var/roothome/anabot.log \
+                /ostree/deploy/test-stateroot/var/log/anaconda/ \
+                /ostree/deploy/test-stateroot/var/roothome/RESULT
+    do
+        guestfish ${args} <<< "
+            launch
+            mount ${root_device} /
+            copy-out '${item}' '${disksdir}'
+            " 2>/dev/null
+    done
+}
+
+kernel_args() {
+    echo "${DEFAULT_BOOTOPTS} console=ttyS7"
+}
+
+additional_runner_args() {
+   # Wait for reboot and shutdown of the VM,
+   # but exit after the specified timeout.
+   echo "--wait $(get_timeout)"
+}
